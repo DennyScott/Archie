@@ -1,0 +1,636 @@
+#==============================================================================
+# ** Vehicle Script
+#------------------------------------------------------------------------------
+# * Created by: albertfish
+# * Version: 1.1
+# * Last edited: December 16, 2009
+#------------------------------------------------------------------------------
+#  Version History:
+#     Version 1.1: December 16, 2009
+#       - Fixed compatibility issues with XAS
+#     Version 1.0: December 14, 2009
+#       - Initial release
+#------------------------------------------------------------------------------
+#  Description:
+#     This script adds vehicles into RPG Maker XP.
+#------------------------------------------------------------------------------
+#  Features:
+#     - Customizable vehicle speeds
+#     - Customizable vehicle graphics
+#     - Easy to setup and use and extremely user friendly
+#     - Plug and play, no need for any lengthy setup or install
+#------------------------------------------------------------------------------
+#  Usage Instructions:
+#     Create an event on the map where you want the vehicle to be. Set the
+#     event's graphic to the graphic you want the vehicle to be. Name the event
+#     as follows:
+#         v_land = land vehicle, you can travel in the same places as you do
+#                  on foot, but at a different speed
+#         v_raft = water vehicle, you can travel in shallow waters
+#         v_ship = water vehicle, you can travel in shallow and deep waters
+#         v_airship = air vehicle, you can travel over anything
+#------------------------------------------------------------------------------
+#  Install Instructions:
+#     Place this script above the main script and below the default scripts.
+#==============================================================================
+
+#==============================================================================
+# ** Vehicle Config
+#------------------------------------------------------------------------------
+#  This module contains the configuration data for the vehicles.
+#------------------------------------------------------------------------------
+#  Begin Editable Area.
+#==============================================================================
+module Vehicle_Config
+  # This is where you set up the vehicle speeds. The vehicle speed are how much
+  # faster they move then when you are on foot.
+  
+  # This value determines the land vehicle's speed
+  # Default: 1
+  LAND_VEHICLE_SPEED = 1
+  
+  # This value determines the raft vehicle's speed
+  # Default: 0
+  RAFT_SPEED = 0
+  
+  # This value determines the ship vehicle's speed
+  # Default: 1
+  SHIP_SPEED = 1
+  
+  # This value determines the airship vehicle's speed
+  # Default: 2
+  AIRSHIP_SPEED = 2
+end
+#==============================================================================
+#  End Editable Area.
+#------------------------------------------------------------------------------
+#  Warning! Do not edit beyond this point unless you know what you are doing!
+#==============================================================================
+  
+#==============================================================================
+# ** Vehicle
+#------------------------------------------------------------------------------
+#  This class performs vehicle processing.
+#==============================================================================
+
+class Vehicle
+  #--------------------------------------------------------------------------
+  # * Include Module
+  #--------------------------------------------------------------------------
+  include Vehicle_Config
+  #--------------------------------------------------------------------------
+  # * Object Initialization
+  #--------------------------------------------------------------------------
+  def initialize(event, type)
+    # Speeds of the different vehicles
+    @speeds = [LAND_VEHICLE_SPEED, RAFT_SPEED, SHIP_SPEED, AIRSHIP_SPEED]
+    @player_speed = $game_player.get_speed
+    # The game event
+    @event = event
+    @type = type
+    @wait = 0
+    @vehicle_entering = true
+    @in_vehicle = false
+    # Store the actors graphic name
+    actor = $game_actors[1]
+    @character_graphic = @graphic = actor.character_name
+  end
+  #--------------------------------------------------------------------------
+  # * Change Actor Graphic
+  #     graphic_name : graphic file name
+  #--------------------------------------------------------------------------
+  def change_actor_graphic(graphic_name)
+    # Set the players graphic to graphic_name
+    actor = $game_actors[1]
+    actor.set_graphic(graphic_name, actor.character_hue, actor.battler_name, 
+                      actor.battler_hue)
+    # Refresh the players graphic
+    $game_player.refresh
+  end
+  #--------------------------------------------------------------------------
+  # * Move
+  #--------------------------------------------------------------------------
+  def move
+    # Make player move through all tiles
+    $game_player.through = true
+    # Move player forward
+    $game_player.move_forward
+    # Don't allow input from player while getting in vehicle
+    $game_system.map_interpreter.switch_vehicle(true)
+    # Make player stop moving through all tiles
+    $game_player.through = false if @type != 3
+  end
+  #--------------------------------------------------------------------------
+  # * Get Vehicle Graphic
+  #--------------------------------------------------------------------------
+  def get_vehicle_graphic
+    # Move the player
+    move
+    # Set the wait to delay to wait for the actor to move before 
+    # changing graphics
+    @wait = 20
+    # Player is now in the vehicle
+    @in_vehicle = true
+    # Return the name of the vehicle's graphic
+    return @event.character_name
+  end
+  def exit
+    # Change the actor's graphic back to what it was
+    change_actor_graphic(@character_graphic)
+    # Unanimate the vehicle
+      $game_player.step_anime = false
+    # Move the player away from the vehicle
+    move
+    # Make player stop moving through all tiles
+    $game_player.through = false
+    # No longer in a vehicle
+    @in_vehicle = false
+    # Redisplay the vehicle event
+    @event.recreate
+    # Adjust move speed
+    $game_player.vehicle_speed(@player_speed)
+    # Allow player to move again
+    $game_system.map_interpreter.switch_vehicle(false)
+    # Don't interact with other events
+    $game_player.in_vehicle = false
+    # Set vehicle type
+    $game_player.vehicle_type = -1
+  end
+  #--------------------------------------------------------------------------
+  # * Exit Airship
+  #     x : x-coordinate
+  #     y : y-coordinate
+  #--------------------------------------------------------------------------
+  def exit_airship(x, y)
+    $game_player.through = false
+    for i in 1..4
+      if $game_player.passable?(x, y, i * 2)
+        case i
+        when 1
+          $game_player.turn_down
+        when 2
+          $game_player.turn_left
+        when 3
+          $game_player.turn_right
+        when 4
+          $game_player.turn_up
+        end
+        exit
+        return true
+      end
+    end
+    $game_player.through = true
+    return false
+  end
+  #--------------------------------------------------------------------------
+  # * Exit Vehicle
+  #     x : x-coordinate
+  #     y : y-coordinate
+  #     d : direction (0,2,4,6,8)
+  #         * 0 = Determines if all directions are impassable (for jumping)
+  #--------------------------------------------------------------------------
+  def exit_vehicle(x, y, d)
+    if @type == 3
+      return exit_airship(x, y)
+    end
+    if $game_player.can_pass?(x, y, d)
+      exit
+      return true
+    end
+    return false
+  end
+  #--------------------------------------------------------------------------
+  # * Update
+  #--------------------------------------------------------------------------
+  def update
+    if @wait == 0
+      if @vehicle_entering
+        # Get the graphic for the vehicle
+        @graphic = get_vehicle_graphic if !@in_vehicle
+        # If there is a delay, do not continue
+        return if @wait != 0
+        # Change the actors graphic to that of the vehicle
+        change_actor_graphic(@graphic)
+        # Animate the vehicle
+        $game_player.step_anime = true if @type != 0
+        # Erase the vehicle event
+        @event.erase
+        # Adjust move speed
+        $game_player.vehicle_speed(@player_speed + @speeds[@type]) 
+        # No longer change the vehicle
+        @vehicle_entering = false
+        # Allow player to move again
+        $game_system.map_interpreter.switch_vehicle(false)
+        # Don't interact with other events
+        $game_player.in_vehicle = true
+        # Set vehicle type
+        $game_player.vehicle_type = @type
+      end
+      # If in a vehicle
+      if @in_vehicle
+        # Move the vehicle event to the players coordinated
+        @event.moveto($game_player.x, $game_player.y)
+      end
+    else
+      @wait -= 1
+    end
+  end
+  #--------------------------------------------------------------------------
+  # * Inside
+  #--------------------------------------------------------------------------
+  def inside
+    return @in_vehicle && @wait == 0
+  end
+end
+
+#==============================================================================
+# ** Scene_Map
+#------------------------------------------------------------------------------
+#  This class performs map screen processing.
+#==============================================================================
+
+class Scene_Map
+  #--------------------------------------------------------------------------
+  # * Main Processing
+  #--------------------------------------------------------------------------
+  alias af_veh_sm_main main
+  def main
+    @vehicle = nil
+    af_veh_sm_main
+  end
+  #--------------------------------------------------------------------------
+  # * Update
+  #--------------------------------------------------------------------------
+  alias af_veh_sm_update update
+  def update
+    # Update the Vechile object
+    @vehicle.update if @vehicle != nil
+    af_veh_sm_update
+    # Get new coordinates
+    d = $game_player.direction
+    new_x = $game_player.x + (d == 6 ? 1 : d == 4 ? -1 : 0)
+    new_y = $game_player.y + (d == 2 ? 1 : d == 8 ? -1 : 0)
+    # If C button was pressed
+    if Input.trigger?(Input::C)
+      # If inside a vehicle
+      if @vehicle != nil && @vehicle.inside
+        # If exited the vehicle
+        if @vehicle.exit_vehicle($game_player.x, $game_player.y, d)
+          # Remove the vehicle object
+          @vehicle = nil
+        end
+      elsif is_vehicle?(new_x, new_y)
+        # Enter the vehicle
+        enter_vehicle(new_x, new_y)
+      end
+    end
+  end
+  #--------------------------------------------------------------------------
+  # * Get Events
+  #     x : event x-coordinate
+  #     y : event y-coordinate
+  #--------------------------------------------------------------------------
+  def get_event_keys(x, y)
+    events = []
+    for key in $game_map.events.keys
+      # If there is an event infront of the player
+      if $game_map.events[key].x == x && $game_map.events[key].y == y
+        # Add that event to events
+        ###events.push($game_map.events[key])###
+        events.push(key)
+      end
+    end
+    return events
+  end
+  #--------------------------------------------------------------------------
+  # * Is Vehicle Name?
+  #     name : event name
+  #--------------------------------------------------------------------------
+  def is_vehicle_name?(name)
+    # Vehicle names
+    names = ["v_land", "v_raft", "v_ship", "v_airship"]
+    for i in names
+      # If name is equal to a vehicles name
+      if i == name.downcase
+        return true
+      end
+    end
+    return false
+  end
+  #--------------------------------------------------------------------------
+  # * Is Vehicle?
+  #     x : event x-coordinate
+  #     y : event y-coordinate
+  #--------------------------------------------------------------------------
+  def is_vehicle?(x, y)
+    for key in get_event_keys(x, y)
+      # If the events name is the name of a vehicle
+      if is_vehicle_name?($game_map.map.events[key].name)
+        return true
+      end
+    end
+    return false
+  end
+  #--------------------------------------------------------------------------
+  # * Get Vehicle ID
+  #     x : event x-coordinate
+  #     y : event y-coordinate
+  #--------------------------------------------------------------------------
+  def get_vehicle_id(x, y)
+    for key in get_event_keys(x, y)
+      # If the events name is the name of a vehicle
+      if is_vehicle_name?($game_map.map.events[key].name)
+        return $game_map.events[key].id
+      end
+    end
+  end
+  #--------------------------------------------------------------------------
+  # * Get Vehicle
+  #     x : event x-coordinate
+  #     y : event y-coordinate
+  #--------------------------------------------------------------------------
+  def get_vehicle(x, y)
+    # Get the id of the vehicle infront of the player
+    vehicle_id = get_vehicle_id(x, y)
+    for key in $game_map.events.keys
+      if $game_map.events[key].id == vehicle_id
+        # Return the event object with the matching event id
+        return $game_map.events[key]
+      end
+    end
+  end
+  #--------------------------------------------------------------------------
+  # * Get Vehicle Name
+  #     x : event x-coordinate
+  #     y : event y-coordinate
+  #--------------------------------------------------------------------------
+  def get_vehicle_name(x, y)
+    # Get the id of the vehicle infront of the player
+    vehicle_id = get_vehicle_id(x, y)
+    for key in $game_map.map.events.keys
+      if $game_map.map.events[key].id == vehicle_id
+        # Return the event's name
+        return $game_map.map.events[key].name
+      end
+    end
+  end
+  #--------------------------------------------------------------------------
+  # * Enter Vehicle
+  #     x : event x-coordinate
+  #     y : event y-coordinate
+  #--------------------------------------------------------------------------
+  def enter_vehicle(x, y)
+    # Get the vehicle event object
+    type = {"v_land" => 0, "v_raft" => 1, "v_ship" => 2, "v_airship" => 3}
+    # Create the vehicle object
+    @vehicle = Vehicle.new(get_vehicle(x, y), type[get_vehicle_name(x, y)])
+  end
+end
+
+#==============================================================================
+# ** Game_Character
+#------------------------------------------------------------------------------
+#  This class deals with characters. It's used as a superclass for the
+#  Game_Player and Game_Event classes.
+#==============================================================================
+
+class Game_Character
+  #--------------------------------------------------------------------------
+  # * Set Through
+  #     through : new boolean throught value
+  #--------------------------------------------------------------------------
+  def through=(through)
+    @through = through
+  end
+  #--------------------------------------------------------------------------
+  # * Set Vehicle Speed
+  #     speed : speed increment
+  #--------------------------------------------------------------------------
+  def vehicle_speed(speed)
+    @move_speed = [[1, speed].max, speed].min
+  end
+  #--------------------------------------------------------------------------
+  # * Get Vehicle Speed
+  #--------------------------------------------------------------------------
+  def get_speed
+    return @move_speed
+  end
+end
+
+class Game_Player < Game_Character
+  #--------------------------------------------------------------------------
+  # * Public Instance Variables
+  #--------------------------------------------------------------------------
+  attr_accessor     :in_vehicle # In vehicle
+  attr_accessor     :vehicle_type # In vehicle
+  #--------------------------------------------------------------------------
+  # * Object Initialization
+  #--------------------------------------------------------------------------
+  alias af_veh_gp_init initialize
+  def initialize
+    @in_vehicle = false
+    @vehicle_type = -1
+    af_veh_gp_init
+  end
+  #--------------------------------------------------------------------------
+  # * Set Vehicle Animation
+  #     step_anime : animation boolean
+  #--------------------------------------------------------------------------
+  def step_anime=(step_anime)
+    @step_anime = step_anime
+  end
+  #--------------------------------------------------------------------------
+  # * Passable Determinants
+  #     x : x-coordinate
+  #     y : y-coordinate
+  #     d : direction (0,2,4,6,8)
+  #         * 0 = Determines if all directions are impassable (for jumping)
+  #--------------------------------------------------------------------------
+  def passable?(x, y, d)
+    # Get new coordinates
+    new_x = x + (d == 6 ? 1 : d == 4 ? -1 : 0)
+    new_y = y + (d == 2 ? 1 : d == 8 ? -1 : 0)
+    # If coordinates are outside of map
+    unless $game_map.valid?(new_x, new_y)
+      # Impassable
+      return false
+    end
+    # If debug mode is ON and ctrl key was pressed
+    if $DEBUG and Input.press?(Input::CTRL)
+      # Passable
+      return true
+    end
+    # If in a water vehicle and on water
+    if $game_map.terrain_tag(new_x, new_y) == 1 && @vehicle_type == 1 ||
+       @vehicle_type == 2 && ($game_map.terrain_tag(new_x, new_y) == 1 ||
+       $game_map.terrain_tag(new_x, new_y) == 2)
+      return true
+    end
+    super
+  end
+  #--------------------------------------------------------------------------
+  # * Same Position Starting Determinant
+  #--------------------------------------------------------------------------
+  alias af_veh_gp_ceth check_event_trigger_here
+  def check_event_trigger_here(triggers)
+    unless @in_vehicle
+      af_veh_gp_ceth(triggers)
+    else
+      return false
+    end
+  end
+  #--------------------------------------------------------------------------
+  # * Front Envent Starting Determinant
+  #--------------------------------------------------------------------------
+  alias af_veh_gp_cett check_event_trigger_there
+  def check_event_trigger_there(triggers)
+    unless @in_vehicle
+      af_veh_gp_cett(triggers)
+    else
+      return false
+    end
+  end
+  #--------------------------------------------------------------------------
+  # * Touch Event Starting Determinant
+  #--------------------------------------------------------------------------
+  alias af_veh_gp_cettouch check_event_trigger_touch
+  def check_event_trigger_touch(x, y)
+    unless @in_vehicle
+      af_veh_gp_cettouch(x, y)
+    else
+      return false
+    end
+  end
+  #--------------------------------------------------------------------------
+  # * Determine if Passable
+  #     x : x-coordinate
+  #     y : y-coordinate
+  #     d : direction (0,2,4,6,8)
+  #         * 0 = Determines if all directions are impassable (for jumping)
+  #--------------------------------------------------------------------------
+  def can_pass?(x, y, d)
+    # Get new coordinates
+    new_x = x + (d == 6 ? 1 : d == 4 ? -1 : 0)
+    new_y = y + (d == 2 ? 1 : d == 8 ? -1 : 0)
+    # If coordinates are outside of map
+    unless $game_map.valid?(new_x, new_y)
+      # Impassable
+      return false
+    end
+    # If debug mode is ON and ctrl key was pressed
+    if $DEBUG and Input.press?(Input::CTRL)
+      # Passable
+      return true
+    end
+    # If in a water vehicle and on water
+    if $game_map.terrain_tag(new_x, new_y) == 1 && @vehicle_type == 1 ||
+       @vehicle_type == 2 && ($game_map.terrain_tag(new_x, new_y) == 1 ||
+       $game_map.terrain_tag(new_x, new_y) == 2)
+      return true
+    end
+    # If through is ON
+    if @through
+      # passable
+      return true
+    end
+    # If unable to enter move tile in designated direction
+    unless $game_map.passable?(new_x, new_y, 10 - d)
+      # impassable
+      return false
+    end
+    # Loop all events
+    for event in $game_map.events.values
+      # If event coordinates are consistent with move destination
+      if event.x == new_x and event.y == new_y
+        # If through is OFF
+        unless event.through
+          # If self is event
+          if self != $game_player
+            # impassable
+            return false
+          end
+          # With self as the player and partner graphic as character
+          if event.character_name != ""
+            # impassable
+            return false
+          end
+        end
+      end
+    end
+    # If player coordinates are consistent with move destination
+    if $game_player.x == new_x and $game_player.y == new_y
+      # If through is OFF
+      unless $game_player.through
+        # If your own graphic is the character
+        if @character_name != ""
+          # impassable
+          return false
+        end
+      end
+    end
+    # passable
+    return true
+  end
+end
+
+#==============================================================================
+# ** Game_Event
+#------------------------------------------------------------------------------
+#  This class deals with events. It handles functions including event page 
+#  switching via condition determinants, and running parallel process events.
+#  It's used within the Game_Map class.
+#==============================================================================
+
+class Game_Event < Game_Character
+  #--------------------------------------------------------------------------
+  # * Recreate
+  #--------------------------------------------------------------------------
+  def recreate
+    @erased = false
+    refresh
+  end
+end
+
+#==============================================================================
+# ** Game_Map
+#------------------------------------------------------------------------------
+#  This class handles the map. It includes scrolling and passable determining
+#  functions. Refer to "$game_map" for the instance of this class.
+#==============================================================================
+
+class Game_Map
+  #--------------------------------------------------------------------------
+  # * Public Instance Variables
+  #--------------------------------------------------------------------------
+  attr_reader   :map
+end
+
+#==============================================================================
+# ** Interpreter
+#------------------------------------------------------------------------------
+#  This interpreter runs event commands. This class is used within the
+#  Game_System class and the Game_Event class.
+#==============================================================================
+
+class Interpreter
+  #--------------------------------------------------------------------------
+  # * Object Initialization
+  #--------------------------------------------------------------------------
+  alias af_veh_int_init initialize
+  def initialize(depth = 0, main = false)
+    @switching_vehicle = false
+    af_veh_int_init(depth, main)
+  end
+  #--------------------------------------------------------------------------
+  # * Switch Vehicle
+  #--------------------------------------------------------------------------
+  def switch_vehicle(value)
+    @switching_vehicle = value
+  end
+  #--------------------------------------------------------------------------
+  # * Determine if Running
+  #--------------------------------------------------------------------------
+  def running?
+    return @list != nil || @switching_vehicle
+  end
+end

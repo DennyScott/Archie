@@ -1,0 +1,171 @@
+class Black_Lung_Timer < Window_Base
+  
+ attr_accessor :time_check
+ attr_accessor :time
+#===============================================================================
+# ** Configuration
+#===============================================================================
+
+WIDTH = 200
+HEIGHT = 90
+X = 640-WIDTH
+Y = 0
+TIMER_SKIN = nil
+TIMER_TITLE = "Black Lung"
+TIMER_SWITCH = 1050
+TIMER_SPEED = 200
+
+#-------------------END OF CONFIG-----------------------------------------------
+
+
+
+  #The initialize method is the first method called when this class starts.
+  def initialize
+      #We are using the super class to set its position and size.
+      super (X,Y,WIDTH,HEIGHT)
+      
+      #Here we are creating the contents of the bit map, since the bitmap will be
+      #larger then the window, we set its width and height to be 32 less.
+      self.contents = Bitmap.new(width-32,height-32)
+      
+      # Determine the skin used for the clock.
+        if TIMER_SKIN == nil
+          self.windowskin = nil
+        elsif TIMER_SKIN == 'DEFAULT SKIN'
+          self.windowskin = RPG::Cache.windowskin($game_system.windowskin_name)
+        else
+          self.windowskin = RPG::Cache.windowskin(CCTS::TIMER_SKIN)
+        end
+        @time_check = 90
+      #Here we are calling the refresh method, which is below, to draw the text.
+      refresh
+      
+    end
+    
+    #The refresh method will be drawing our text.
+  def refresh
+    #We first will clear the contents of the bitmap.
+    self.contents.clear
+      # Draw Lung Title
+      self.contents.font.size = 16
+      self.contents.draw_text(0, 0, WIDTH/2, 16, TIMER_TITLE)
+      # Draw black lung timer.
+      # Below we set the style bar to 0, as a different script forces a number in this position
+      @style=0
+      #We take the time subtractions and place the rate within the bar.
+      @time=@time_check
+      @colors1 = [Color.new(0, 0, 0), Color.new(255, 255, 255), Color.new(0, 0 , 0)]
+      w, h, rate, max = WIDTH, 30, @time, 100 #Change numbers to variables
+        self.contents.draw_bar(0, 16, w, h, rate, max, @style, @colors1)
+      
+      end
+      
+  def time_counter
+    # Calculate total number of seconds
+      @total_sec =+ (Graphics.frame_count * TIMER_SPEED / 60)
+      time_change = @total_sec % 60
+    
+      if time_change == 0
+        @time_check = @time_check - 1
+      end
+      
+
+    end
+  
+  def update
+    self.visible = $game_switches[TIMER_SWITCH]
+      time_counter
+        refresh
+  end 
+  
+end
+
+#===============================================================================
+# ** Gradient_Bar
+#===============================================================================
+
+class Bitmap
+  
+  def draw_bar(x, y, w, h, rate, max, style, colors = nil)
+    # Set required instance variables.
+    @bar_rect = Rect.new(x, y, w, h)
+    @rate, @max, @style, @colors = rate, max, style, colors
+    # Define default colors if not defined. (RED <--> GREEN)
+    if @colors == nil
+      @colors = [Color.new(0, 0, 0), Color.new(255, 255, 255), Color.new(0, 0 , 0)]
+    end
+    # Draw the background color.
+    self.fill_rect(@bar_rect, @colors[2])
+    # Continue the bar with the gradient style
+    gradient
+  end
+#-------------------------------------------------------------------------------
+  def gradient
+    # Get the bar from the cache. 
+    key = [@style, @bar_rect.width-2, @bar_rect.height-2, @colors[0], @colors[1]]
+    bar = RPG::Cache.gradient_bar(*key)
+    # Draw the gradient bar using rectangular transfer.
+    rect = Rect.new(0, 0, fill_width, @bar_rect.height)
+    self.blt(@bar_rect.x+1, @bar_rect.y+1, bar, rect)
+  end
+  
+  #-------------------------------------------------------------------------------
+  def fill_width
+    # Calculate the difference, in percentage, of the min and max rates.
+    return ((@rate / @max.to_f) * (@bar_rect.width - 2)).round
+    
+  end
+#-------------------------------------------------------------------------------
+end
+
+#===============================================================================
+# ** Scene_Map
+#===============================================================================
+
+class Scene_Map
+  attr_accessor :black_lung
+  alias glitch_lung_main main
+  alias glitch_lung_update update
+  
+  def main
+    @black_lung = Black_Lung_Timer.new
+    glitch_lung_main
+    @black_lung.visible = true
+    @black_lung.dispose
+   end
+   
+  def update
+    glitch_lung_update
+    @black_lung.update
+  end
+    
+end
+
+#===============================================================================
+# ** RPG::Cache
+#===============================================================================
+
+module RPG::Cache
+  
+  def self.gradient_bar(style, width, height, color1, color2)
+    # Create a unique key to call the bar back with.
+    path = [style, width, height, color1, color2]
+    # Check if cache already has bitmap defined, if not create it now.
+    if !@cache.include?(path) || @cache[path].disposed?
+      bitmap, rates = Bitmap.new(width, height), []
+      # Iterate through each pixel horizontally, setting a gradient color.
+      c1 = [color1.red, color1.green, color1.blue, color1.alpha]
+      c2 = [color2.red, color2.green, color2.blue, color2.alpha]
+      # Draw the bar, having in transition from the first color to the second.
+      c1.each_index {|i| rates[i] = (c1[i] - c2[i]).to_f / width }
+      (0...width).each {|i|
+        values = [0, 1, 2, 3].collect {|j| c1[j] - (i * rates[j]) }
+        # Set the color incrementally. This will be used later.
+        bitmap.fill_rect(i, 0, 1, height, Color.new(*values))
+      }
+      @cache[path] = bitmap
+    end
+    # Return the created bitmap.
+    return @cache[path]
+  end
+end
